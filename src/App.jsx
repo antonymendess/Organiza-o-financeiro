@@ -1,7 +1,28 @@
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 import MetaTab from './components/MetaTab';
+
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { erro: null }; }
+  static getDerivedStateFromError(erro) { return { erro }; }
+  componentDidCatch(erro, info) { console.error('Erro capturado:', erro, info); }
+  render() {
+    if (this.state.erro) {
+      return (
+        <div style={{ padding: 40, maxWidth: 600, margin: '0 auto', fontFamily: 'sans-serif' }}>
+          <h2>Ops, algo deu errado.</h2>
+          <p style={{ color: '#5B6B63' }}>{this.state.erro.message}</p>
+          <button
+            style={{ marginTop: 12, padding: '10px 16px', borderRadius: 8, border: 'none', background: '#16241F', color: '#fff', cursor: 'pointer' }}
+            onClick={() => { this.setState({ erro: null }); window.location.reload(); }}
+          >Recarregar página</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda checando
@@ -22,7 +43,7 @@ export default function App() {
     return <Login />;
   }
 
-  return <Dashboard userId={session.user.id} />;
+  return <ErrorBoundary><Dashboard userId={session.user.id} /></ErrorBoundary>;
 }
 
 function Dashboard({ userId }) {

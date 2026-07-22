@@ -29,46 +29,55 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
 
   async function marcarPaga(conta) {
     const dataRef = dataRefDoCiclo(conta);
-    const { data: novoPagamento } = await supabase.from('pagamentos_conta').insert({
+    const { data: novoPagamento, error } = await supabase.from('pagamentos_conta').insert({
       user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym, data: dataRef, tipo: 'pagamento'
     }).select().single();
+    if (error) { alert('Erro ao marcar como paga: ' + error.message); return; }
     setPagamentos(prev => [...prev, novoPagamento]);
 
-    const { data: novoLt } = await supabase.from('lancamentos').insert({
+    const { data: novoLt, error: errorLt } = await supabase.from('lancamentos').insert({
       user_id: userId, tipo: 'despesa', pessoa: conta.pessoa, valor: conta.valor,
       data: dataRef, categoria: conta.categoria, descricao: conta.nome,
       origem_conta_id: conta.id
     }).select().single();
+    if (errorLt) { alert('Erro ao lançar despesa: ' + errorLt.message); return; }
 
     if (onContaPaga) onContaPaga(novoLt);
   }
 
   async function marcarReservada(conta) {
-    const { data: novaReserva } = await supabase.from('pagamentos_conta').insert({
+    const { data: novaReserva, error } = await supabase.from('pagamentos_conta').insert({
       user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym,
       data: new Date().toISOString().slice(0, 10), tipo: 'reserva'
     }).select().single();
+    if (error) {
+      alert('Erro ao reservar: ' + error.message + '\n\nSe a mensagem falar da coluna "tipo", você precisa rodar o arquivo migracao_reserva.sql no SQL Editor do Supabase.');
+      return;
+    }
     setPagamentos(prev => [...prev, novaReserva]);
   }
 
   async function desfazerReserva(conta) {
     const reserva = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym && p.tipo === 'reserva');
     if (!reserva) return;
-    await supabase.from('pagamentos_conta').delete().eq('id', reserva.id);
+    const { error } = await supabase.from('pagamentos_conta').delete().eq('id', reserva.id);
+    if (error) { alert('Erro ao desfazer reserva: ' + error.message); return; }
     setPagamentos(prev => prev.filter(p => p.id !== reserva.id));
   }
 
   async function desfazerPagamento(conta) {
     const pagamento = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym && p.tipo !== 'reserva');
     if (!pagamento) return;
-    await supabase.from('pagamentos_conta').delete().eq('id', pagamento.id);
+    const { error } = await supabase.from('pagamentos_conta').delete().eq('id', pagamento.id);
+    if (error) { alert('Erro ao desfazer pagamento: ' + error.message); return; }
     await supabase.from('lancamentos').delete().eq('origem_conta_id', conta.id).eq('data', pagamento.data);
     setPagamentos(prev => prev.filter(p => p.id !== pagamento.id));
   }
 
   async function removerConta(id) {
     if (!confirm('Remover esta conta e todo o histórico dela?')) return;
-    await supabase.from('contas').delete().eq('id', id);
+    const { error } = await supabase.from('contas').delete().eq('id', id);
+    if (error) { alert('Erro ao remover: ' + error.message); return; }
     setContas(prev => prev.filter(c => c.id !== id));
   }
 
