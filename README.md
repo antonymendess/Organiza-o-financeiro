@@ -37,7 +37,10 @@ Tudo numa página só, sem abas:
    disso o `migracao_unificacao.sql` — ele cria as tabelas novas e
    copia suas contas fixas já cadastradas pra dentro da nova estrutura,
    sem apagar nada.
-5. Vá em **Project Settings → API**. Copie:
+5. Se você já tinha o app rodando com a versão anterior ao recurso de
+   "reserva" (separar dinheiro do salário pro mês seguinte antes de
+   pagar), rode também o `migracao_reserva.sql`.
+6. Vá em **Project Settings → API**. Copie:
    - **Project URL** → vai virar `VITE_SUPABASE_URL`
    - **anon public key** → vai virar `VITE_SUPABASE_ANON_KEY`
 

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   fmtMoeda, ymDe, labelMes, mesesDisponiveis, ultimosMeses,
-  calcularMetaGoal, agruparPorCategoria, contaAtivaNoCiclo
+  calcularMetaGoal, agruparPorCategoria, contaAtivaNoCiclo,
+  cicloAtual, proximoMes, calcularResumoReserva, valorReservadoNoMes
 } from '../utils';
 import ContasDashboard from './ContasDashboard';
 
@@ -44,11 +45,7 @@ export default function MetaTab({
   const [filtroPessoa, setFiltroPessoa] = useState('todos');
   const [filtroMes, setFiltroMes] = useState('todos');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
-  const [mesResumo, setMesResumo] = useState(mesesDisponiveis(lancamentos, contas)[0]);
-
-  useEffect(() => {
-    if (!mesResumo) setMesResumo(mesesDisponiveis(lancamentos, contas)[0]);
-  }, [lancamentos, contas]);
+  const [mesResumo, setMesResumo] = useState(cicloAtual());
 
   useEffect(() => {
     setMesInicio(ymDe(data));
@@ -142,7 +139,8 @@ export default function MetaTab({
   const despesasMes = [...despesasAvulsasMes, ...contasDoMesResumo.map(c => ({ categoria: c.categoria, valor: c.valor }))];
   const totalReceitaMes = receitasMes.reduce((s, l) => s + Number(l.valor), 0);
   const totalDespesaMes = despesasMes.reduce((s, l) => s + Number(l.valor), 0);
-  const saldoMes = totalReceitaMes - totalDespesaMes;
+  const reservadoNoMesResumo = mesResumo ? valorReservadoNoMes(pagamentos, mesResumo) : 0;
+  const saldoMes = totalReceitaMes - totalDespesaMes - reservadoNoMesResumo;
 
   const totalEu = lancamentos.filter(l => l.tipo === 'aporte' && l.pessoa === 'eu').reduce((s, l) => s + Number(l.valor), 0);
   const totalEsposa = lancamentos.filter(l => l.tipo === 'aporte' && l.pessoa === 'esposa').reduce((s, l) => s + Number(l.valor), 0);
@@ -156,6 +154,13 @@ export default function MetaTab({
     return { ...m, renda, despesa: despesaAvulsa + despesaContas };
   });
   const maxFluxo = Math.max(...fluxoDados.map(d => Math.max(d.renda, d.despesa)), 1);
+
+  const ymAtualReal = cicloAtual();
+  const ymProximoReal = proximoMes(ymAtualReal);
+  const recebiMesAtual = lancamentos
+    .filter(l => l.tipo === 'renda' && ymDe(l.data) === ymAtualReal)
+    .reduce((s, l) => s + Number(l.valor), 0);
+  const resumoReserva = calcularResumoReserva(contas, pagamentos, ymProximoReal);
 
   const inicioRange = new Date(meses6[0].ano, meses6[0].mes, 1);
   let acumulado = lancamentos.filter(l => l.tipo === 'aporte' && new Date(l.data + 'T00:00:00') < inicioRange).reduce((s, l) => s + Number(l.valor), 0);
@@ -317,7 +322,10 @@ export default function MetaTab({
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 18, paddingBottom: 18, borderBottom: '1px solid var(--border)' }}>
               <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Receita</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: 'var(--teal)' }}>{fmtMoeda(totalReceitaMes)}</div></div>
               <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Despesa</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: 'var(--brick)' }}>{fmtMoeda(totalDespesaMes)}</div></div>
-              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Saldo do mês</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: saldoMes < 0 ? 'var(--brick)' : 'var(--teal)' }}>{fmtMoeda(saldoMes)}</div></div>
+              {reservadoNoMesResumo > 0 && (
+                <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Reservado p/ próx. mês</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: 'var(--gold)' }}>{fmtMoeda(reservadoNoMesResumo)}</div></div>
+              )}
+              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Saldo livre do mês</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: saldoMes < 0 ? 'var(--brick)' : 'var(--teal)' }}>{fmtMoeda(saldoMes)}</div></div>
             </div>
             <div className="resumo-grid">
               <div>
@@ -328,6 +336,17 @@ export default function MetaTab({
                 <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)', marginBottom: 12 }}>Receitas por origem</div>
                 <BarrasCategoria lista={receitasMes} vazio="Nenhuma receita neste mês." />
               </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 4 }}>Depois do pagamento</h2>
+            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 16 }}>Reserva para {labelMes(ymProximoReal)}</div>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Recebi este mês</label><div className="mono" style={{ fontSize: 17, fontWeight: 600 }}>{fmtMoeda(recebiMesAtual)}</div></div>
+              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Preciso reservar</label><div className="mono" style={{ fontSize: 17, fontWeight: 600 }}>{fmtMoeda(resumoReserva.total)}</div></div>
+              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Já reservei</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: 'var(--teal)' }}>{fmtMoeda(resumoReserva.jaReservado)}</div></div>
+              <div><label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--ink-muted)' }}>Falta reservar</label><div className="mono" style={{ fontSize: 17, fontWeight: 600, color: resumoReserva.faltaReservar > 0 ? 'var(--brick)' : 'var(--teal)' }}>{fmtMoeda(resumoReserva.faltaReservar)}</div></div>
             </div>
           </div>
 

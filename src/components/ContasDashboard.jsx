@@ -3,6 +3,7 @@ import { fmtMoeda, statusContaNoCiclo, contaAtivaNoCiclo, calcularKpisContas, la
 
 const SITUACAO_LABEL = {
   paga: 'Paga',
+  reservada: 'Reservada',
   atrasada: 'Atrasada',
   pendente: 'Pendente',
   agendada: 'Agendada',
@@ -11,6 +12,7 @@ const SITUACAO_LABEL = {
 };
 const SITUACAO_CLASSE = {
   paga: 'em_dia',
+  reservada: 'negociando',
   atrasada: 'atrasado',
   pendente: 'negociando',
   agendada: 'negociando',
@@ -19,13 +21,16 @@ const SITUACAO_CLASSE = {
 };
 
 export default function ContasDashboard({ userId, config, contas, setContas, pagamentos, setPagamentos, ym, onContaPaga }) {
-  async function marcarPaga(conta) {
+  function dataRefDoCiclo(conta) {
     const [ano, mes] = ym.split('-').map(Number);
     const diaValido = Math.min(conta.dia_vencimento, new Date(ano, mes, 0).getDate());
-    const dataRef = new Date(ano, mes - 1, diaValido).toISOString().slice(0, 10);
+    return new Date(ano, mes - 1, diaValido).toISOString().slice(0, 10);
+  }
 
+  async function marcarPaga(conta) {
+    const dataRef = dataRefDoCiclo(conta);
     const { data: novoPagamento } = await supabase.from('pagamentos_conta').insert({
-      user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym, data: dataRef
+      user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym, data: dataRef, tipo: 'pagamento'
     }).select().single();
     setPagamentos(prev => [...prev, novoPagamento]);
 
@@ -38,8 +43,23 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
     if (onContaPaga) onContaPaga(novoLt);
   }
 
+  async function marcarReservada(conta) {
+    const { data: novaReserva } = await supabase.from('pagamentos_conta').insert({
+      user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym,
+      data: new Date().toISOString().slice(0, 10), tipo: 'reserva'
+    }).select().single();
+    setPagamentos(prev => [...prev, novaReserva]);
+  }
+
+  async function desfazerReserva(conta) {
+    const reserva = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym && p.tipo === 'reserva');
+    if (!reserva) return;
+    await supabase.from('pagamentos_conta').delete().eq('id', reserva.id);
+    setPagamentos(prev => prev.filter(p => p.id !== reserva.id));
+  }
+
   async function desfazerPagamento(conta) {
-    const pagamento = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym);
+    const pagamento = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym && p.tipo !== 'reserva');
     if (!pagamento) return;
     await supabase.from('pagamentos_conta').delete().eq('id', pagamento.id);
     await supabase.from('lancamentos').delete().eq('origem_conta_id', conta.id).eq('data', pagamento.data);
@@ -47,7 +67,7 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
   }
 
   async function removerConta(id) {
-    if (!confirm('Remover esta conta e todo o histórico de pagamentos dela?')) return;
+    if (!confirm('Remover esta conta e todo o histórico dela?')) return;
     await supabase.from('contas').delete().eq('id', id);
     setContas(prev => prev.filter(c => c.id !== id));
   }
@@ -117,9 +137,18 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
                     <span className={`status-pill ${SITUACAO_CLASSE[c.situacao]}`}>{SITUACAO_LABEL[c.situacao]}</span>
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {!c.concluida && (c.pago
-                      ? <button className="del-btn" onClick={() => desfazerPagamento(c)}>desfazer</button>
-                      : <button className="del-btn" style={{ color: 'var(--teal)' }} onClick={() => marcarPaga(c)}>marcar pago</button>)}
+                    {!c.concluida && !c.pago && c.situacao !== 'reservada' && (
+                      <button className="del-btn" style={{ color: 'var(--gold)' }} onClick={() => marcarReservada(c)}>reservar</button>
+                    )}
+                    {c.situacao === 'reservada' && (
+                      <button className="del-btn" onClick={() => desfazerReserva(c)} style={{ marginRight: 8 }}>desfazer reserva</button>
+                    )}
+                    {!c.concluida && !c.pago && (
+                      <button className="del-btn" style={{ color: 'var(--teal)', marginLeft: 8 }} onClick={() => marcarPaga(c)}>marcar pago</button>
+                    )}
+                    {c.pago && (
+                      <button className="del-btn" onClick={() => desfazerPagamento(c)}>desfazer</button>
+                    )}
                     <button className="del-btn" style={{ marginLeft: 8 }} onClick={() => removerConta(c.id)}>excluir</button>
                   </td>
                 </tr>

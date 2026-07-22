@@ -72,6 +72,8 @@ create table contas (
 -- ------------------------------------------------------------
 -- Histórico de pagamentos de cada conta (um registro por ciclo
 -- pago). "ciclo" no formato 'YYYY-MM'.
+-- tipo = 'reserva'   -> dinheiro já separado, mas ainda não debitado
+-- tipo = 'pagamento' -> conta efetivamente paga
 -- ------------------------------------------------------------
 create table pagamentos_conta (
   id uuid primary key default uuid_generate_v4(),
@@ -80,6 +82,7 @@ create table pagamentos_conta (
   valor numeric not null,
   data date not null default current_date,
   ciclo text not null,
+  tipo text not null default 'pagamento' check (tipo in ('pagamento','reserva')),
   created_at timestamptz default now()
 );
 

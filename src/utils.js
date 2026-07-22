@@ -16,11 +16,15 @@ export function labelMes(ym) {
 
 export function mesesDisponiveis(lancamentos, contas = []) {
   const hoje = new Date();
-  const atual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
-  const set = new Set([atual]);
+  const set = new Set();
+  // sempre disponibiliza os próximos 12 meses pra dar pra planejar/reservar com antecedência
+  for (let i = -6; i <= 12; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
   lancamentos.forEach(l => set.add(ymDe(l.data)));
   contas.forEach(c => set.add(ymDe(c.data_inicio)));
-  return Array.from(set).sort().reverse();
+  return Array.from(set).sort();
 }
 
 export function ultimosMeses(n) {
@@ -89,11 +93,21 @@ export function contaAtivaNoCiclo(conta, ym) {
 }
 
 export function foiPagaNoCiclo(contaId, pagamentos, ym) {
-  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ym);
+  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ym && p.tipo !== 'reserva');
+}
+
+export function foiReservadaNoCiclo(contaId, pagamentos, ym) {
+  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ym && p.tipo === 'reserva');
 }
 
 export function totalParcelasPagas(contaId, pagamentos) {
-  return pagamentos.filter(p => p.conta_id === contaId).length;
+  return pagamentos.filter(p => p.conta_id === contaId && p.tipo !== 'reserva').length;
+}
+
+export function proximoMes(ym) {
+  const [ano, mes] = ym.split('-').map(Number);
+  const d = new Date(ano, mes, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // Dias até o vencimento dentro do mês/ciclo REAL atual. Só faz sentido
@@ -107,6 +121,7 @@ export function diasParaVencimento(diaVencimento) {
 // Status de uma conta num ciclo específico (pode ser passado, atual ou futuro)
 export function statusContaNoCiclo(conta, pagamentos, ym) {
   const pago = foiPagaNoCiclo(conta.id, pagamentos, ym);
+  const reservado = foiReservadaNoCiclo(conta.id, pagamentos, ym);
   const ymAtual = cicloAtual();
   const parcelasPagas = totalParcelasPagas(conta.id, pagamentos);
   const concluida = conta.quantidade_parcelas && parcelasPagas >= conta.quantidade_parcelas;
@@ -116,6 +131,8 @@ export function statusContaNoCiclo(conta, pagamentos, ym) {
     situacao = 'concluida';
   } else if (pago) {
     situacao = 'paga';
+  } else if (reservado) {
+    situacao = 'reservada';
   } else if (ym > ymAtual) {
     situacao = 'agendada';
   } else if (ym < ymAtual) {
@@ -124,7 +141,7 @@ export function statusContaNoCiclo(conta, pagamentos, ym) {
     dias = diasParaVencimento(conta.dia_vencimento);
     situacao = dias < 0 ? 'atrasada' : 'pendente';
   }
-  return { pago, dias, situacao, parcelasPagas, concluida };
+  return { pago, reservado, dias, situacao, parcelasPagas, concluida };
 }
 
 export function calcularKpisContas(contas, pagamentos, ym) {
@@ -146,4 +163,27 @@ export function calcularKpisContas(contas, pagamentos, ym) {
 
   pendentes.sort((a, b) => a.dias - b.dias);
   return { totalMes, jaPago, faltaPagar: totalMes - jaPago, atrasadas, proximo: pendentes[0] || null };
+}
+
+// Resumo de reserva: quanto preciso separar agora pro próximo ciclo,
+// e quanto já separei (reservado ou até já pago adiantado).
+export function calcularResumoReserva(contas, pagamentos, ymAlvo) {
+  const doMes = contas.filter(c => contaAtivaNoCiclo(c, ymAlvo));
+  let total = 0, jaReservado = 0;
+  doMes.forEach(c => {
+    const st = statusContaNoCiclo(c, pagamentos, ymAlvo);
+    if (st.concluida) return;
+    total += Number(c.valor);
+    if (st.situacao === 'reservada' || st.situacao === 'paga') jaReservado += Number(c.valor);
+  });
+  return { total, jaReservado, faltaReservar: total - jaReservado };
+}
+
+// Quanto dinheiro saiu do "livre" de um mês porque foi reservado ali
+// pra cobrir contas de um mês futuro (baseado na data em que a reserva
+// foi feita, não no mês da conta que ela cobre).
+export function valorReservadoNoMes(pagamentos, ym) {
+  return pagamentos
+    .filter(p => p.tipo === 'reserva' && ymDe(p.data) === ym)
+    .reduce((s, p) => s + Number(p.valor), 0);
 }
