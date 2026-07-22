@@ -146,7 +146,7 @@ export function statusContaNoCiclo(conta, pagamentos, ym) {
 
 export function calcularKpisContas(contas, pagamentos, ym) {
   const doMes = contas.filter(c => contaAtivaNoCiclo(c, ym));
-  let totalMes = 0, jaPago = 0, atrasadas = 0;
+  let totalMes = 0, jaPago = 0, reservado = 0, atrasadas = 0;
   const pendentes = [];
 
   doMes.forEach(c => {
@@ -155,6 +155,9 @@ export function calcularKpisContas(contas, pagamentos, ym) {
     totalMes += Number(c.valor);
     if (st.pago) {
       jaPago += Number(c.valor);
+    } else if (st.situacao === 'reservada') {
+      reservado += Number(c.valor);
+      pendentes.push({ nome: c.nome, dias: st.dias ?? 0 });
     } else {
       if (st.situacao === 'atrasada') atrasadas++;
       pendentes.push({ nome: c.nome, dias: st.dias ?? 0 });
@@ -162,7 +165,7 @@ export function calcularKpisContas(contas, pagamentos, ym) {
   });
 
   pendentes.sort((a, b) => a.dias - b.dias);
-  return { totalMes, jaPago, faltaPagar: totalMes - jaPago, atrasadas, proximo: pendentes[0] || null };
+  return { totalMes, jaPago, reservado, faltaPagar: totalMes - jaPago, atrasadas, proximo: pendentes[0] || null };
 }
 
 // Resumo de reserva: quanto preciso separar agora pro próximo ciclo,

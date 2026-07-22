@@ -106,6 +106,10 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
           <div className="v mono" style={{ color: 'var(--teal)' }}>{fmtMoeda(kpis.jaPago)}</div>
         </div>
         <div className="kpi-card">
+          <label>Reservado</label>
+          <div className="v mono" style={{ color: 'var(--gold)' }}>{fmtMoeda(kpis.reservado)}</div>
+        </div>
+        <div className="kpi-card">
           <label>Falta pagar</label>
           <div className="v mono">{fmtMoeda(kpis.faltaPagar)}</div>
         </div>
