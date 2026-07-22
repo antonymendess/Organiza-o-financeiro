@@ -8,14 +8,22 @@ graça na Vercel.
 
 ## O que tem aqui
 
+Tudo numa página só, sem abas:
+
 - **Meta de poupança**: valor alvo, prazo, ritmo necessário por mês,
   aportes, comparativo entre duas pessoas.
-- **Fluxo de caixa**: lançamentos avulsos de despesa/renda (coisas
-  pontuais, não recorrentes), gráficos de categoria e histórico.
-- **Minhas contas** (unificado): tudo que você paga com regularidade —
-  aluguel, assinatura, parcelamento, cartão de crédito — numa lista só.
-  Cada conta mostra quanto falta pagar este mês, quando vence, e quantas
-  parcelas faltam (se tiver fim definido). Um clique marca como paga.
+- **Cadastro único**: um só formulário (+Aporte / +Despesa / +Renda)
+  pra tudo. Ao lançar uma despesa, marcando "Repetir todo mês" ela vira
+  automaticamente uma conta recorrente — com quantidade de parcelas
+  opcional (em branco = sem fim) e a opção de escolher a partir de qual
+  mês ela deve começar a contar (útil se você já pagou o mês atual e só
+  quer que passe a valer do mês que vem em diante).
+- **Resumo do mês**: receita, despesa, saldo, e gráficos de categoria.
+- **Minhas contas**: um mini-dashboard com tudo que você cadastrou como
+  recorrente — total do mês, já pago, falta pagar, atrasadas — e uma
+  lista compacta pra marcar cada uma como paga.
+- **Histórico**: gráficos dos últimos 6 meses.
+- **Lançamentos**: extrato completo com filtro por pessoa, mês e categoria.
 - Login por e-mail/senha (Supabase Auth) — só você acessa seus dados.
 
 ## Passo 1 — Configurar o Supabase
@@ -80,7 +88,7 @@ migracao_unificacao.sql     → se já tinha o app rodando antes
 src/supabaseClient.js       → conexão com o Supabase
 src/utils.js                → cálculos (meta, contas, datas)
 src/components/Login.jsx
-src/components/MetaTab.jsx      → meta + fluxo de caixa + lançamentos avulsos
-src/components/ContasSection.jsx → lista única de contas a pagar
-src/App.jsx                  → tela única
+src/components/MetaTab.jsx          → meta + cadastro único + resumo + histórico + lançamentos
+src/components/ContasDashboard.jsx  → mini-dashboard de contas a pagar
+src/App.jsx                  → carrega os dados e monta a tela única
 ```

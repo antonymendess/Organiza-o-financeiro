@@ -4,17 +4,36 @@ import {
   fmtMoeda, ymDe, labelMes, mesesDisponiveis, ultimosMeses,
   calcularMetaGoal, agruparPorCategoria
 } from '../utils';
+import ContasDashboard from './ContasDashboard';
 
-const CATEGORIAS_DESPESA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Assinaturas', 'Outros'];
+const CATEGORIAS_DESPESA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Assinaturas', 'Cartão', 'Empréstimo', 'Loja', 'Financiamento', 'Outros'];
 const ORIGENS_RENDA = ['Renda fixa', 'Comissão', 'Outros'];
 
-export default function MetaTab({ userId, config, setConfig, lancamentos, setLancamentos }) {
+function proximosMeses(dataBase, n) {
+  const base = new Date(dataBase + 'T00:00:00');
+  const arr = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    arr.push(ym);
+  }
+  return arr;
+}
+
+export default function MetaTab({
+  userId, config, setConfig, lancamentos, setLancamentos,
+  contas, setContas, pagamentos, setPagamentos
+}) {
   const [tabForm, setTabForm] = useState('aporte');
   const [pessoa, setPessoa] = useState('eu');
   const [valor, setValor] = useState('');
   const [data, setData] = useState(new Date().toISOString().slice(0, 10));
   const [categoria, setCategoria] = useState(CATEGORIAS_DESPESA[0]);
   const [descricao, setDescricao] = useState('');
+
+  const [repetirMes, setRepetirMes] = useState(false);
+  const [qtdParcelas, setQtdParcelas] = useState('');
+  const [mesInicio, setMesInicio] = useState(ymDe(new Date().toISOString().slice(0, 10)));
 
   const [settingsAberto, setSettingsAberto] = useState(false);
   const [metaValorInput, setMetaValorInput] = useState(config.meta_valor);
@@ -31,18 +50,43 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
     if (!mesResumo) setMesResumo(mesesDisponiveis(lancamentos)[0]);
   }, [lancamentos]);
 
+  useEffect(() => {
+    setMesInicio(ymDe(data));
+  }, [data]);
+
+  function setTab(tipo) {
+    setTabForm(tipo);
+    setRepetirMes(false);
+    setQtdParcelas('');
+    if (tipo === 'despesa') setCategoria(CATEGORIAS_DESPESA[0]);
+    if (tipo === 'renda') setCategoria(ORIGENS_RENDA[0]);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!valor || Number(valor) <= 0 || !data) return;
     const cat = tabForm !== 'aporte' ? categoria : null;
 
-    const { data: novoLt } = await supabase.from('lancamentos').insert({
-      user_id: userId, tipo: tabForm, pessoa, valor: Number(valor), data,
-      categoria: cat, descricao, origem_conta_id: null
-    }).select().single();
+    if (tabForm === 'despesa' && repetirMes) {
+      const dia = new Date(data + 'T00:00:00').getDate();
+      const dataInicio = mesInicio + '-01';
+      const { data: novaConta, error } = await supabase.from('contas').insert({
+        user_id: userId, nome: descricao || categoria, categoria: cat, pessoa,
+        tipo_valor: 'fixo', valor: Number(valor),
+        quantidade_parcelas: qtdParcelas ? Number(qtdParcelas) : null,
+        dia_vencimento: dia, data_inicio: dataInicio, ativa: true
+      }).select().single();
+      if (error) { alert('Erro ao cadastrar: ' + error.message); return; }
+      setContas(prev => [novaConta, ...prev]);
+    } else {
+      const { data: novoLt } = await supabase.from('lancamentos').insert({
+        user_id: userId, tipo: tabForm, pessoa, valor: Number(valor), data,
+        categoria: cat, descricao, origem_conta_id: null
+      }).select().single();
+      setLancamentos(prev => [novoLt, ...prev]);
+    }
 
-    setLancamentos(prev => [novoLt, ...prev]);
-    setValor(''); setDescricao('');
+    setValor(''); setDescricao(''); setRepetirMes(false); setQtdParcelas('');
   }
 
   async function removerLancamento(id) {
@@ -60,7 +104,7 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
   }
 
   function exportarBackup() {
-    const payload = { config, lancamentos };
+    const payload = { config, lancamentos, contas, pagamentos };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -73,6 +117,7 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
   const goal = calcularMetaGoal(lancamentos, config);
   const meses = mesesDisponiveis(lancamentos);
   const categoriasUsadas = Array.from(new Set(lancamentos.filter(l => l.categoria).map(l => l.categoria))).sort();
+  const opcoesMesInicio = proximosMeses(data, 12);
 
   const doMes = (tipo, ym) => {
     if (!ym) return [];
@@ -178,16 +223,13 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
       </div>
 
       <div className="grid">
-        {/* --------- Coluna esquerda: formulário --------- */}
+        {/* --------- Coluna esquerda: cadastro único --------- */}
         <div>
           <div className="card">
             <div className="tabs">
-              <button className={`tab-btn ${tabForm === 'aporte' ? 'active' : ''}`} onClick={() => setTabForm('aporte')}>+ Aporte</button>
-              <button className={`tab-btn ${tabForm === 'despesa' ? 'active' : ''}`} onClick={() => { setTabForm('despesa'); setCategoria(CATEGORIAS_DESPESA[0]); }}>+ Despesa avulsa</button>
-              <button className={`tab-btn ${tabForm === 'renda' ? 'active' : ''}`} onClick={() => { setTabForm('renda'); setCategoria(ORIGENS_RENDA[0]); }}>+ Renda avulsa</button>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 12 }}>
-              Use isso pra gastos e ganhos pontuais (não recorrentes). Contas fixas, parceladas ou cartão ficam na seção "Minhas contas" abaixo.
+              <button className={`tab-btn ${tabForm === 'aporte' ? 'active' : ''}`} onClick={() => setTab('aporte')}>+ Aporte</button>
+              <button className={`tab-btn ${tabForm === 'despesa' ? 'active' : ''}`} onClick={() => setTab('despesa')}>+ Despesa</button>
+              <button className={`tab-btn ${tabForm === 'renda' ? 'active' : ''}`} onClick={() => setTab('renda')}>+ Renda</button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="person-toggle">
@@ -206,9 +248,33 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
                   </div>
                 )}
               </div>
-              <div><label>Descrição (opcional)</label><input value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="ex: conserto do carro" /></div>
+              <div><label>Descrição (opcional)</label><input value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="ex: Aluguel, Cartão Nubank" /></div>
+
+              {tabForm === 'despesa' && (
+                <>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={repetirMes} onChange={e => setRepetirMes(e.target.checked)} />
+                    <span style={{ fontSize: 13, color: 'var(--ink)' }}>Repetir todo mês (vira uma conta em "Minhas contas")</span>
+                  </label>
+                  {repetirMes && (
+                    <div style={{ background: 'var(--surface-alt)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div>
+                        <label>Quantidade de parcelas (em branco = sem fim, ex: aluguel)</label>
+                        <input type="number" min="1" placeholder="ex: 12" value={qtdParcelas} onChange={e => setQtdParcelas(e.target.value)} />
+                      </div>
+                      <div>
+                        <label>Começar a contar a partir de</label>
+                        <select value={mesInicio} onChange={e => setMesInicio(e.target.value)}>
+                          {opcoesMesInicio.map(ym => <option key={ym} value={ym}>{labelMes(ym)}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
               <button className="btn-primary" type="submit">
-                {tabForm === 'aporte' ? 'Guardar aporte' : tabForm === 'despesa' ? 'Lançar despesa' : 'Lançar renda'}
+                {tabForm === 'aporte' ? 'Guardar aporte' : tabForm === 'despesa' ? (repetirMes ? 'Cadastrar conta' : 'Lançar despesa') : 'Lançar renda'}
               </button>
             </form>
           </div>
@@ -228,7 +294,7 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
           </div>
         </div>
 
-        {/* --------- Coluna direita: resumo, histórico, lançamentos --------- */}
+        {/* --------- Coluna direita: resumo, contas, histórico, lançamentos --------- */}
         <div>
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -253,6 +319,13 @@ export default function MetaTab({ userId, config, setConfig, lancamentos, setLan
               </div>
             </div>
           </div>
+
+          <ContasDashboard
+            userId={userId} config={config}
+            contas={contas} setContas={setContas}
+            pagamentos={pagamentos} setPagamentos={setPagamentos}
+            onContaPaga={(novoLt) => setLancamentos(prev => [novoLt, ...prev])}
+          />
 
           <div className="card">
             <h2>Histórico (últimos 6 meses)</h2>

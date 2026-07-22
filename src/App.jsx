@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 import MetaTab from './components/MetaTab';
-import ContasSection from './components/ContasSection';
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda checando
@@ -29,6 +28,8 @@ export default function App() {
 function Dashboard({ userId }) {
   const [config, setConfig] = useState(null);
   const [lancamentos, setLancamentos] = useState([]);
+  const [contas, setContas] = useState([]);
+  const [pagamentos, setPagamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => { carregar(); }, []);
@@ -50,7 +51,12 @@ function Dashboard({ userId }) {
     setConfig(cfg);
 
     const { data: lts } = await supabase.from('lancamentos').select('*').eq('user_id', userId).order('data', { ascending: false });
+    const { data: cts } = await supabase.from('contas').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    const { data: pgs } = await supabase.from('pagamentos_conta').select('*').eq('user_id', userId);
+
     setLancamentos(lts || []);
+    setContas(cts || []);
+    setPagamentos(pgs || []);
     setCarregando(false);
   }
 
@@ -65,12 +71,13 @@ function Dashboard({ userId }) {
         <button className="logout-btn" onClick={() => supabase.auth.signOut()}>Sair</button>
       </header>
 
-      <MetaTab userId={userId} config={config} setConfig={setConfig} lancamentos={lancamentos} setLancamentos={setLancamentos} />
-
-      <div className="section-divider">
-        <span className="display">Minhas contas</span>
-      </div>
-      <ContasSection userId={userId} config={config} onContaPaga={(novoLt) => setLancamentos(prev => [novoLt, ...prev])} />
+      <MetaTab
+        userId={userId}
+        config={config} setConfig={setConfig}
+        lancamentos={lancamentos} setLancamentos={setLancamentos}
+        contas={contas} setContas={setContas}
+        pagamentos={pagamentos} setPagamentos={setPagamentos}
+      />
     </div>
   );
 }
