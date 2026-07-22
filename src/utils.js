@@ -14,11 +14,12 @@ export function labelMes(ym) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-export function mesesDisponiveis(lancamentos) {
+export function mesesDisponiveis(lancamentos, contas = []) {
   const hoje = new Date();
   const atual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
   const set = new Set([atual]);
   lancamentos.forEach(l => set.add(ymDe(l.data)));
+  contas.forEach(c => set.add(ymDe(c.data_inicio)));
   return Array.from(set).sort().reverse();
 }
 
@@ -29,7 +30,7 @@ export function ultimosMeses(n) {
     const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
     let label = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
     label = label.charAt(0).toUpperCase() + label.slice(1);
-    arr.push({ ano: d.getFullYear(), mes: d.getMonth(), label });
+    arr.push({ ano: d.getFullYear(), mes: d.getMonth(), label, ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` });
   }
   return arr;
 }
@@ -75,43 +76,71 @@ export function agruparPorCategoria(lista) {
   return Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
 }
 
-// ---------------- Contas (unificado) ----------------
+// ---------------- Contas (unificado, sempre referente a um ciclo/mês) ----------------
 
 export function cicloAtual() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Dias até o vencimento NESTE ciclo (mês atual). Negativo = já passou e está atrasada.
-export function diasParaVencimento(diaVencimento) {
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  const venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaVencimento);
-  return Math.round((venc - hoje) / (1000 * 60 * 60 * 24));
+// A conta já começou a valer neste ciclo? (respeita "começar a contar a partir de")
+export function contaAtivaNoCiclo(conta, ym) {
+  return conta.ativa && ymDe(conta.data_inicio) <= ym;
 }
 
-export function foiPagaNesteCiclo(contaId, pagamentos, ciclo) {
-  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ciclo);
+export function foiPagaNoCiclo(contaId, pagamentos, ym) {
+  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ym);
 }
 
 export function totalParcelasPagas(contaId, pagamentos) {
   return pagamentos.filter(p => p.conta_id === contaId).length;
 }
 
-export function calcularKpisContas(contas, pagamentos) {
-  const ciclo = cicloAtual();
-  const ativas = contas.filter(c => c.ativa);
+// Dias até o vencimento dentro do mês/ciclo REAL atual. Só faz sentido
+// quando o ciclo sendo visto é o mês corrente de verdade.
+export function diasParaVencimento(diaVencimento) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaVencimento);
+  return Math.round((venc - hoje) / (1000 * 60 * 60 * 24));
+}
+
+// Status de uma conta num ciclo específico (pode ser passado, atual ou futuro)
+export function statusContaNoCiclo(conta, pagamentos, ym) {
+  const pago = foiPagaNoCiclo(conta.id, pagamentos, ym);
+  const ymAtual = cicloAtual();
+  const parcelasPagas = totalParcelasPagas(conta.id, pagamentos);
+  const concluida = conta.quantidade_parcelas && parcelasPagas >= conta.quantidade_parcelas;
+
+  let situacao, dias = null;
+  if (concluida) {
+    situacao = 'concluida';
+  } else if (pago) {
+    situacao = 'paga';
+  } else if (ym > ymAtual) {
+    situacao = 'agendada';
+  } else if (ym < ymAtual) {
+    situacao = 'nao_paga_no_mes';
+  } else {
+    dias = diasParaVencimento(conta.dia_vencimento);
+    situacao = dias < 0 ? 'atrasada' : 'pendente';
+  }
+  return { pago, dias, situacao, parcelasPagas, concluida };
+}
+
+export function calcularKpisContas(contas, pagamentos, ym) {
+  const doMes = contas.filter(c => contaAtivaNoCiclo(c, ym));
   let totalMes = 0, jaPago = 0, atrasadas = 0;
   const pendentes = [];
 
-  ativas.forEach(c => {
-    const pago = foiPagaNesteCiclo(c.id, pagamentos, ciclo);
+  doMes.forEach(c => {
+    const st = statusContaNoCiclo(c, pagamentos, ym);
+    if (st.concluida) return;
     totalMes += Number(c.valor);
-    if (pago) {
+    if (st.pago) {
       jaPago += Number(c.valor);
     } else {
-      const dias = diasParaVencimento(c.dia_vencimento);
-      if (dias < 0) atrasadas++;
-      pendentes.push({ nome: c.nome, dias });
+      if (st.situacao === 'atrasada') atrasadas++;
+      pendentes.push({ nome: c.nome, dias: st.dias ?? 0 });
     }
   });
 

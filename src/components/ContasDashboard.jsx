@@ -1,17 +1,37 @@
 import { supabase } from '../supabaseClient';
-import { fmtMoeda, diasParaVencimento, foiPagaNesteCiclo, totalParcelasPagas, calcularKpisContas, cicloAtual } from '../utils';
+import { fmtMoeda, statusContaNoCiclo, contaAtivaNoCiclo, calcularKpisContas, labelMes } from '../utils';
 
-export default function ContasDashboard({ userId, config, contas, setContas, pagamentos, setPagamentos, onContaPaga }) {
+const SITUACAO_LABEL = {
+  paga: 'Paga',
+  atrasada: 'Atrasada',
+  pendente: 'Pendente',
+  agendada: 'Agendada',
+  nao_paga_no_mes: 'Não paga naquele mês',
+  concluida: 'Concluída'
+};
+const SITUACAO_CLASSE = {
+  paga: 'em_dia',
+  atrasada: 'atrasado',
+  pendente: 'negociando',
+  agendada: 'negociando',
+  nao_paga_no_mes: 'atrasado',
+  concluida: 'quitado'
+};
+
+export default function ContasDashboard({ userId, config, contas, setContas, pagamentos, setPagamentos, ym, onContaPaga }) {
   async function marcarPaga(conta) {
-    const ciclo = cicloAtual();
+    const [ano, mes] = ym.split('-').map(Number);
+    const diaValido = Math.min(conta.dia_vencimento, new Date(ano, mes, 0).getDate());
+    const dataRef = new Date(ano, mes - 1, diaValido).toISOString().slice(0, 10);
+
     const { data: novoPagamento } = await supabase.from('pagamentos_conta').insert({
-      user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo, data: new Date().toISOString().slice(0, 10)
+      user_id: userId, conta_id: conta.id, valor: conta.valor, ciclo: ym, data: dataRef
     }).select().single();
     setPagamentos(prev => [...prev, novoPagamento]);
 
     const { data: novoLt } = await supabase.from('lancamentos').insert({
       user_id: userId, tipo: 'despesa', pessoa: conta.pessoa, valor: conta.valor,
-      data: new Date().toISOString().slice(0, 10), categoria: conta.categoria, descricao: conta.nome,
+      data: dataRef, categoria: conta.categoria, descricao: conta.nome,
       origem_conta_id: conta.id
     }).select().single();
 
@@ -19,8 +39,7 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
   }
 
   async function desfazerPagamento(conta) {
-    const ciclo = cicloAtual();
-    const pagamento = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ciclo);
+    const pagamento = pagamentos.find(p => p.conta_id === conta.id && p.ciclo === ym);
     if (!pagamento) return;
     await supabase.from('pagamentos_conta').delete().eq('id', pagamento.id);
     await supabase.from('lancamentos').delete().eq('origem_conta_id', conta.id).eq('data', pagamento.data);
@@ -33,23 +52,20 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
     setContas(prev => prev.filter(c => c.id !== id));
   }
 
-  const kpis = calcularKpisContas(contas, pagamentos);
-  const ciclo = cicloAtual();
+  const kpis = calcularKpisContas(contas, pagamentos, ym);
 
-  const comInfo = contas.filter(c => c.ativa).map(c => {
-    const pago = foiPagaNesteCiclo(c.id, pagamentos, ciclo);
-    const dias = diasParaVencimento(c.dia_vencimento);
-    const parcelasPagas = totalParcelasPagas(c.id, pagamentos);
-    const concluida = c.quantidade_parcelas && parcelasPagas >= c.quantidade_parcelas;
-    return { ...c, pago, dias, parcelasPagas, concluida };
-  }).sort((a, b) => {
-    if (a.pago !== b.pago) return a.pago ? 1 : -1;
-    return a.dias - b.dias;
-  });
+  const comInfo = contas
+    .filter(c => contaAtivaNoCiclo(c, ym))
+    .map(c => ({ ...c, ...statusContaNoCiclo(c, pagamentos, ym) }))
+    .sort((a, b) => {
+      if (a.pago !== b.pago) return a.pago ? 1 : -1;
+      return (a.dias ?? 0) - (b.dias ?? 0);
+    });
 
   return (
     <div className="card">
-      <h2>Minhas contas</h2>
+      <h2 style={{ marginBottom: 4 }}>Minhas contas</h2>
+      <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 14 }}>Referente a {labelMes(ym)}</div>
 
       <div className="crm-kpis" style={{ marginBottom: 18 }}>
         <div className="kpi-card">
@@ -71,7 +87,7 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
       </div>
 
       {comInfo.length === 0 ? (
-        <div className="empty">Nenhuma conta cadastrada ainda. Marque "Repetir todo mês" ao lançar uma despesa pra ela aparecer aqui.</div>
+        <div className="empty">Nenhuma conta ativa neste mês. Marque "Repetir todo mês" ao lançar uma despesa pra ela aparecer aqui.</div>
       ) : (
         <div style={{ maxHeight: 360, overflowY: 'auto' }}>
           <table>
@@ -87,27 +103,18 @@ export default function ContasDashboard({ userId, config, contas, setContas, pag
                       {c.categoria}
                       {c.tipo_valor === 'variavel' && ' · cartão'}
                       {c.quantidade_parcelas && ` · ${c.parcelasPagas}/${c.quantidade_parcelas} parcelas`}
-                      {!c.quantidade_parcelas && c.tipo_valor === 'fixo' && ' · sem prazo'}
+                      {!c.quantidade_parcelas && ' · sem prazo'}
                     </div>
                   </td>
                   <td><span className={`tag ${c.pessoa}`}>{c.pessoa === 'eu' ? config.nome_eu : config.nome_esposa}</span></td>
                   <td className="mono" style={{ textAlign: 'right' }}>{fmtMoeda(c.valor)}</td>
                   <td className="mono">
                     dia {c.dia_vencimento}
-                    {!c.pago && !c.concluida && (
-                      <div style={{ fontSize: 11, color: c.dias < 0 ? 'var(--brick)' : 'var(--ink-muted)' }}>
-                        {c.dias === 0 ? 'hoje' : c.dias > 0 ? `em ${c.dias}d` : `${Math.abs(c.dias)}d atrasada`}
-                      </div>
-                    )}
+                    {c.situacao === 'atrasada' && <div style={{ fontSize: 11, color: 'var(--brick)' }}>{Math.abs(c.dias)}d atrasada</div>}
+                    {c.situacao === 'pendente' && <div style={{ fontSize: 11, color: 'var(--ink-muted)' }}>{c.dias === 0 ? 'hoje' : `em ${c.dias}d`}</div>}
                   </td>
                   <td>
-                    {c.concluida
-                      ? <span className="status-pill quitado">Concluída</span>
-                      : c.pago
-                        ? <span className="status-pill em_dia">Paga</span>
-                        : c.dias < 0
-                          ? <span className="status-pill atrasado">Atrasada</span>
-                          : <span className="status-pill negociando">Pendente</span>}
+                    <span className={`status-pill ${SITUACAO_CLASSE[c.situacao]}`}>{SITUACAO_LABEL[c.situacao]}</span>
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {!c.concluida && (c.pago

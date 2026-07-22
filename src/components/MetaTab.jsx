@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   fmtMoeda, ymDe, labelMes, mesesDisponiveis, ultimosMeses,
-  calcularMetaGoal, agruparPorCategoria
+  calcularMetaGoal, agruparPorCategoria, contaAtivaNoCiclo
 } from '../utils';
 import ContasDashboard from './ContasDashboard';
 
@@ -44,11 +44,11 @@ export default function MetaTab({
   const [filtroPessoa, setFiltroPessoa] = useState('todos');
   const [filtroMes, setFiltroMes] = useState('todos');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
-  const [mesResumo, setMesResumo] = useState(mesesDisponiveis(lancamentos)[0]);
+  const [mesResumo, setMesResumo] = useState(mesesDisponiveis(lancamentos, contas)[0]);
 
   useEffect(() => {
-    if (!mesResumo) setMesResumo(mesesDisponiveis(lancamentos)[0]);
-  }, [lancamentos]);
+    if (!mesResumo) setMesResumo(mesesDisponiveis(lancamentos, contas)[0]);
+  }, [lancamentos, contas]);
 
   useEffect(() => {
     setMesInicio(ymDe(data));
@@ -115,21 +115,31 @@ export default function MetaTab({
   }
 
   const goal = calcularMetaGoal(lancamentos, config);
-  const meses = mesesDisponiveis(lancamentos);
+  const meses = mesesDisponiveis(lancamentos, contas);
   const categoriasUsadas = Array.from(new Set(lancamentos.filter(l => l.categoria).map(l => l.categoria))).sort();
   const opcoesMesInicio = proximosMeses(data, 12);
+
+  const contasNaoConcluidas = (ym) => contas.filter(c => {
+    if (!contaAtivaNoCiclo(c, ym)) return false;
+    if (!c.quantidade_parcelas) return true;
+    const pagas = pagamentos.filter(p => p.conta_id === c.id).length;
+    return pagas < c.quantidade_parcelas;
+  });
 
   const doMes = (tipo, ym) => {
     if (!ym) return [];
     const [ano, mesIdx] = ym.split('-').map(Number);
     return lancamentos.filter(l => {
       if (l.tipo !== tipo) return false;
+      if (l.origem_conta_id) return false; // contas entram pela tabela "contas", não duplicam aqui
       const d = new Date(l.data + 'T00:00:00');
       return d.getMonth() === mesIdx - 1 && d.getFullYear() === ano;
     });
   };
-  const despesasMes = doMes('despesa', mesResumo);
+  const despesasAvulsasMes = doMes('despesa', mesResumo);
   const receitasMes = doMes('renda', mesResumo);
+  const contasDoMesResumo = mesResumo ? contasNaoConcluidas(mesResumo) : [];
+  const despesasMes = [...despesasAvulsasMes, ...contasDoMesResumo.map(c => ({ categoria: c.categoria, valor: c.valor }))];
   const totalReceitaMes = receitasMes.reduce((s, l) => s + Number(l.valor), 0);
   const totalDespesaMes = despesasMes.reduce((s, l) => s + Number(l.valor), 0);
   const saldoMes = totalReceitaMes - totalDespesaMes;
@@ -140,9 +150,10 @@ export default function MetaTab({
 
   const meses6 = ultimosMeses(6);
   const fluxoDados = meses6.map(m => {
-    const renda = lancamentos.filter(l => l.tipo === 'renda' && new Date(l.data + 'T00:00:00').getMonth() === m.mes && new Date(l.data + 'T00:00:00').getFullYear() === m.ano).reduce((s, l) => s + Number(l.valor), 0);
-    const despesa = lancamentos.filter(l => l.tipo === 'despesa' && new Date(l.data + 'T00:00:00').getMonth() === m.mes && new Date(l.data + 'T00:00:00').getFullYear() === m.ano).reduce((s, l) => s + Number(l.valor), 0);
-    return { ...m, renda, despesa };
+    const renda = lancamentos.filter(l => l.tipo === 'renda' && !l.origem_conta_id && new Date(l.data + 'T00:00:00').getMonth() === m.mes && new Date(l.data + 'T00:00:00').getFullYear() === m.ano).reduce((s, l) => s + Number(l.valor), 0);
+    const despesaAvulsa = lancamentos.filter(l => l.tipo === 'despesa' && !l.origem_conta_id && new Date(l.data + 'T00:00:00').getMonth() === m.mes && new Date(l.data + 'T00:00:00').getFullYear() === m.ano).reduce((s, l) => s + Number(l.valor), 0);
+    const despesaContas = contasNaoConcluidas(m.ym).reduce((s, c) => s + Number(c.valor), 0);
+    return { ...m, renda, despesa: despesaAvulsa + despesaContas };
   });
   const maxFluxo = Math.max(...fluxoDados.map(d => Math.max(d.renda, d.despesa)), 1);
 
@@ -324,6 +335,7 @@ export default function MetaTab({
             userId={userId} config={config}
             contas={contas} setContas={setContas}
             pagamentos={pagamentos} setPagamentos={setPagamentos}
+            ym={mesResumo}
             onContaPaga={(novoLt) => setLancamentos(prev => [novoLt, ...prev])}
           />
 
