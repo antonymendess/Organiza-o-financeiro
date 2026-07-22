@@ -75,36 +75,46 @@ export function agruparPorCategoria(lista) {
   return Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
 }
 
-// ---------------- CRM de cobrança ----------------
+// ---------------- Contas (unificado) ----------------
 
-export function diasAteVencimento(diaVencimento) {
-  const hoje = new Date();
-  let venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaVencimento);
-  if (venc < hoje) venc = new Date(hoje.getFullYear(), hoje.getMonth() + 1, diaVencimento);
-  const diffMs = venc - new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+export function cicloAtual() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function saldoDevedorCredor(c) {
-  if (c.tipo_divida === 'rotativo') return Number(c.valor_fatura_atual || 0);
-  const restante = Number(c.valor_parcela || 0) * ((c.quantidade_parcelas || 0) - (c.parcelas_pagas || 0));
-  return Math.max(restante, 0);
+// Dias até o vencimento NESTE ciclo (mês atual). Negativo = já passou e está atrasada.
+export function diasParaVencimento(diaVencimento) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaVencimento);
+  return Math.round((venc - hoje) / (1000 * 60 * 60 * 24));
 }
 
-export function compromissoMensalCredor(c) {
-  if (c.tipo_divida === 'rotativo') return Number(c.valor_fatura_atual || 0);
-  return Number(c.valor_parcela || 0);
+export function foiPagaNesteCiclo(contaId, pagamentos, ciclo) {
+  return pagamentos.some(p => p.conta_id === contaId && p.ciclo === ciclo);
 }
 
-export function calcularKpisCredores(credores) {
-  const ativos = credores.filter(c => c.status !== 'quitado');
-  const totalDivida = ativos.reduce((s, c) => s + saldoDevedorCredor(c), 0);
-  const comprometidoMensal = ativos.reduce((s, c) => s + compromissoMensalCredor(c), 0);
-  const atrasados = credores.filter(c => c.status === 'atrasado').length;
-  const proximosVencimentos = ativos
-    .map(c => ({ nome: c.nome, dias: diasAteVencimento(c.dia_vencimento) }))
-    .sort((a, b) => a.dias - b.dias);
-  const proximo = proximosVencimentos[0] || null;
+export function totalParcelasPagas(contaId, pagamentos) {
+  return pagamentos.filter(p => p.conta_id === contaId).length;
+}
 
-  return { totalDivida, comprometidoMensal, atrasados, proximo, ativosCount: ativos.length };
+export function calcularKpisContas(contas, pagamentos) {
+  const ciclo = cicloAtual();
+  const ativas = contas.filter(c => c.ativa);
+  let totalMes = 0, jaPago = 0, atrasadas = 0;
+  const pendentes = [];
+
+  ativas.forEach(c => {
+    const pago = foiPagaNesteCiclo(c.id, pagamentos, ciclo);
+    totalMes += Number(c.valor);
+    if (pago) {
+      jaPago += Number(c.valor);
+    } else {
+      const dias = diasParaVencimento(c.dia_vencimento);
+      if (dias < 0) atrasadas++;
+      pendentes.push({ nome: c.nome, dias });
+    }
+  });
+
+  pendentes.sort((a, b) => a.dias - b.dias);
+  return { totalMes, jaPago, faltaPagar: totalMes - jaPago, atrasadas, proximo: pendentes[0] || null };
 }

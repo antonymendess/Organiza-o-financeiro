@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 import MetaTab from './components/MetaTab';
-import CrmTab from './components/CrmTab';
+import ContasSection from './components/ContasSection';
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda checando
-  const [tab, setTab] = useState('meta');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -24,19 +23,54 @@ export default function App() {
     return <Login />;
   }
 
+  return <Dashboard userId={session.user.id} />;
+}
+
+function Dashboard({ userId }) {
+  const [config, setConfig] = useState(null);
+  const [lancamentos, setLancamentos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+
+  useEffect(() => { carregar(); }, []);
+
+  async function carregar() {
+    setCarregando(true);
+    let { data: configs } = await supabase.from('configuracoes').select('*').eq('user_id', userId).limit(1);
+    let cfg;
+    if (configs && configs.length) {
+      cfg = configs[0];
+    } else {
+      const dataFim = new Date();
+      dataFim.setFullYear(dataFim.getFullYear() + 2);
+      const { data: novo } = await supabase.from('configuracoes')
+        .insert({ user_id: userId, data_fim: dataFim.toISOString().slice(0, 10) })
+        .select().single();
+      cfg = novo;
+    }
+    setConfig(cfg);
+
+    const { data: lts } = await supabase.from('lancamentos').select('*').eq('user_id', userId).order('data', { ascending: false });
+    setLancamentos(lts || []);
+    setCarregando(false);
+  }
+
+  if (carregando || !config) {
+    return <div className="empty" style={{ padding: 60, textAlign: 'center' }}>Carregando seus dados...</div>;
+  }
+
   return (
     <div className="wrap">
       <header>
-        <h1 className="display">Meta<span>70</span> · Controle &amp; Cobrança</h1>
+        <h1 className="display">Meta<span>70</span> · Minhas Contas</h1>
         <button className="logout-btn" onClick={() => supabase.auth.signOut()}>Sair</button>
       </header>
 
-      <div className="top-tabs">
-        <button className={`top-tab ${tab === 'meta' ? 'active' : ''}`} onClick={() => setTab('meta')}>Meta &amp; Fluxo</button>
-        <button className={`top-tab ${tab === 'crm' ? 'active' : ''}`} onClick={() => setTab('crm')}>CRM de Cobrança</button>
-      </div>
+      <MetaTab userId={userId} config={config} setConfig={setConfig} lancamentos={lancamentos} setLancamentos={setLancamentos} />
 
-      {tab === 'meta' ? <MetaTab userId={session.user.id} /> : <CrmTab userId={session.user.id} />}
+      <div className="section-divider">
+        <span className="display">Minhas contas</span>
+      </div>
+      <ContasSection userId={userId} config={config} onContaPaga={(novoLt) => setLancamentos(prev => [novoLt, ...prev])} />
     </div>
   );
 }

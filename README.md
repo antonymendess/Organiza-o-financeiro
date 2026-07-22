@@ -1,41 +1,37 @@
-# Meta70 · Controle & Cobrança
+# Meta70 · Minhas Contas
 
-CRM pessoal de controle financeiro (meta de poupança + fluxo de caixa) e
-gestão de dívidas com credores. React + Vite + Supabase, feito pra hospedar
-de graça na Vercel.
+App pessoal de controle financeiro numa tela única: meta de poupança,
+fluxo de caixa e todas as suas contas a pagar (fixas, parceladas ou
+cartão de crédito) — sem abas, sem status de negociação, só controle
+direto de quanto você vai pagar. React + Vite + Supabase, hospedado de
+graça na Vercel.
 
 ## O que tem aqui
 
-- **Meta & Fluxo**: meta de poupança com prazo, ritmo necessário por mês,
-  aportes, despesas, receitas, contas fixas recorrentes, comparativo entre
-  duas pessoas, gráficos de categoria/histórico.
-- **CRM de Cobrança**: cadastro de credores (cartão, empréstimo, loja,
-  financiamento), com dois tipos de dívida — **parcelada** (valor fixo,
-  ex: 10x de R$200) e **cartão de crédito rotativo** (fatura que varia
-  todo mês). Cada dívida pode ter um "titular" opcional (ex: "Cartão da
-  Mãe") pra você identificar de quem é. Tem parcelas/fatura, vencimento,
-  status (em dia / atrasado / negociando / quitado), histórico de
-  negociação e de faturas, KPIs de dívida total e comprometimento mensal.
+- **Meta de poupança**: valor alvo, prazo, ritmo necessário por mês,
+  aportes, comparativo entre duas pessoas.
+- **Fluxo de caixa**: lançamentos avulsos de despesa/renda (coisas
+  pontuais, não recorrentes), gráficos de categoria e histórico.
+- **Minhas contas** (unificado): tudo que você paga com regularidade —
+  aluguel, assinatura, parcelamento, cartão de crédito — numa lista só.
+  Cada conta mostra quanto falta pagar este mês, quando vence, e quantas
+  parcelas faltam (se tiver fim definido). Um clique marca como paga.
 - Login por e-mail/senha (Supabase Auth) — só você acessa seus dados.
 
 ## Passo 1 — Configurar o Supabase
 
 1. Entre no seu projeto em [supabase.com](https://supabase.com).
 2. Vá em **SQL Editor** → **New query**.
-3. Abra o arquivo `schema.sql` (nesta pasta), copie todo o conteúdo, cole
-   no editor e clique em **Run**. Isso cria todas as tabelas e as regras de
-   segurança (cada usuário só vê os próprios dados).
-   - Se você já tinha rodado uma versão anterior deste `schema.sql`
-     (antes do suporte a cartão de crédito rotativo), rode em vez disso
-     o arquivo `migracao_cartoes.sql` — ele só adiciona o que falta, sem
-     apagar nada que você já cadastrou.
-4. Vá em **Project Settings → API**. Copie:
+3. Se for uma instalação nova (projeto Supabase vazio), rode o
+   `schema.sql` inteiro.
+4. Se você já tinha o app rodando com uma versão anterior (CRM de
+   credores com negociação, ou contas fixas separadas), rode em vez
+   disso o `migracao_unificacao.sql` — ele cria as tabelas novas e
+   copia suas contas fixas já cadastradas pra dentro da nova estrutura,
+   sem apagar nada.
+5. Vá em **Project Settings → API**. Copie:
    - **Project URL** → vai virar `VITE_SUPABASE_URL`
    - **anon public key** → vai virar `VITE_SUPABASE_ANON_KEY`
-5. (Opcional, recomendado) Em **Authentication → Providers → Email**,
-   você pode desativar a exigência de confirmação de e-mail se quiser
-   entrar direto sem clicar em link de confirmação — em
-   **Authentication → Settings**, desmarque "Confirm email".
 
 ## Passo 2 — Rodar localmente (opcional, pra testar antes)
 
@@ -46,50 +42,45 @@ cp .env.example .env
 npm run dev
 ```
 
-Abra o endereço que aparecer no terminal (geralmente `http://localhost:5173`).
-Crie sua conta pela tela de login ("Não tem conta? Criar uma agora").
+## Passo 3 — Subir pro GitHub
 
-## Passo 3 — Subir para o GitHub
+Se já tem um repositório: suba os arquivos atualizados (certifique-se
+de que a pasta `src/` inteira, com todos os componentes, foi enviada).
 
+Se for do zero:
 ```bash
 git init
 git add .
-git commit -m "Meta70 CRM"
+git commit -m "Meta70 unificado"
 ```
-
-Crie um repositório novo no GitHub e siga as instruções que ele mostra
-para enviar (`git remote add origin ...` e `git push`).
+Crie um repositório no GitHub e siga as instruções de `git remote add
+origin ...` / `git push`.
 
 ## Passo 4 — Deploy na Vercel
 
-1. Em [vercel.com](https://vercel.com), clique em **Add New → Project**.
-2. Selecione o repositório que você acabou de subir.
-3. A Vercel detecta automaticamente que é um projeto Vite — não precisa
-   mudar nada no build.
-4. Antes de clicar em **Deploy**, abra **Environment Variables** e
-   adicione:
-   - `VITE_SUPABASE_URL` = sua URL do Supabase
-   - `VITE_SUPABASE_ANON_KEY` = sua chave anon
-5. Clique em **Deploy**. Em cerca de 1 minuto você recebe um link
-   (`algo.vercel.app`) já funcionando, acessível de qualquer lugar.
+1. Em [vercel.com](https://vercel.com), importe o repositório.
+2. Confirme que o **Root Directory** aponta pra pasta que contém o
+   `package.json` (se você subiu a pasta do projeto como subpasta do
+   repo, ajuste isso em Settings → General → Root Directory).
+3. Em **Environment Variables**, adicione `VITE_SUPABASE_URL` e
+   `VITE_SUPABASE_ANON_KEY` (marcando Production, Preview e
+   Development).
+4. Clique em **Deploy**.
 
 ## Backup
 
-Dentro do app, em "Ajustar meta, prazo e backup", tem um botão pra baixar
-um `.json` com os dados da aba Meta & Fluxo. Como os dados agora moram no
-Supabase (não no navegador), formatar o PC não apaga nada — mas vale a
-pena, de vez em quando, entrar no **Supabase → Database → Backups** e
-conferir se o backup automático do próprio Supabase está ativo no seu
-plano.
+Dentro do app, em "Ajustar meta, prazo e backup", tem um botão pra
+baixar um `.json` com os dados de meta e lançamentos avulsos.
 
 ## Estrutura dos arquivos
 
 ```
-schema.sql              → rode isso no SQL Editor do Supabase
-src/supabaseClient.js   → conexão com o Supabase
-src/utils.js            → cálculos (meta, dívidas, datas)
+schema.sql                  → instalação nova, rode no SQL Editor
+migracao_unificacao.sql     → se já tinha o app rodando antes
+src/supabaseClient.js       → conexão com o Supabase
+src/utils.js                → cálculos (meta, contas, datas)
 src/components/Login.jsx
-src/components/MetaTab.jsx
-src/components/CrmTab.jsx
-src/App.jsx             → tela principal com as duas abas
+src/components/MetaTab.jsx      → meta + fluxo de caixa + lançamentos avulsos
+src/components/ContasSection.jsx → lista única de contas a pagar
+src/App.jsx                  → tela única
 ```

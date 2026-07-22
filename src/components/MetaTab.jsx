@@ -8,122 +8,46 @@ import {
 const CATEGORIAS_DESPESA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Assinaturas', 'Outros'];
 const ORIGENS_RENDA = ['Renda fixa', 'Comissão', 'Outros'];
 
-export default function MetaTab({ userId }) {
-  const [config, setConfig] = useState(null);
-  const [lancamentos, setLancamentos] = useState([]);
-  const [recorrentes, setRecorrentes] = useState([]);
-  const [carregando, setCarregando] = useState(true);
-
+export default function MetaTab({ userId, config, setConfig, lancamentos, setLancamentos }) {
   const [tabForm, setTabForm] = useState('aporte');
   const [pessoa, setPessoa] = useState('eu');
   const [valor, setValor] = useState('');
   const [data, setData] = useState(new Date().toISOString().slice(0, 10));
   const [categoria, setCategoria] = useState(CATEGORIAS_DESPESA[0]);
   const [descricao, setDescricao] = useState('');
-  const [ehFixa, setEhFixa] = useState(false);
 
   const [settingsAberto, setSettingsAberto] = useState(false);
-  const [metaValorInput, setMetaValorInput] = useState(70000);
-  const [dataFimInput, setDataFimInput] = useState('');
-  const [nomeEuInput, setNomeEuInput] = useState('Eu');
-  const [nomeEsposaInput, setNomeEsposaInput] = useState('Esposa');
+  const [metaValorInput, setMetaValorInput] = useState(config.meta_valor);
+  const [dataFimInput, setDataFimInput] = useState(config.data_fim);
+  const [nomeEuInput, setNomeEuInput] = useState(config.nome_eu);
+  const [nomeEsposaInput, setNomeEsposaInput] = useState(config.nome_esposa);
 
   const [filtroPessoa, setFiltroPessoa] = useState('todos');
   const [filtroMes, setFiltroMes] = useState('todos');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
-  const [mesResumo, setMesResumo] = useState(null);
+  const [mesResumo, setMesResumo] = useState(mesesDisponiveis(lancamentos)[0]);
 
-  useEffect(() => { carregarTudo(); }, []);
-
-  async function carregarTudo() {
-    setCarregando(true);
-    let { data: configs } = await supabase.from('configuracoes').select('*').eq('user_id', userId).limit(1);
-    let cfg;
-    if (configs && configs.length) {
-      cfg = configs[0];
-    } else {
-      const dataFim = new Date();
-      dataFim.setFullYear(dataFim.getFullYear() + 2);
-      const { data: novo } = await supabase.from('configuracoes')
-        .insert({ user_id: userId, data_fim: dataFim.toISOString().slice(0, 10) })
-        .select().single();
-      cfg = novo;
-    }
-    setConfig(cfg);
-    setMetaValorInput(cfg.meta_valor);
-    setDataFimInput(cfg.data_fim);
-    setNomeEuInput(cfg.nome_eu);
-    setNomeEsposaInput(cfg.nome_esposa);
-
-    const { data: lts } = await supabase.from('lancamentos').select('*').eq('user_id', userId).order('data', { ascending: false });
-    const { data: recs } = await supabase.from('recorrentes').select('*').eq('user_id', userId);
-
-    await gerarRecorrentesFaltantes(recs || [], lts || []);
-    setRecorrentes(recs || []);
-
-    const { data: ltsFinal } = await supabase.from('lancamentos').select('*').eq('user_id', userId).order('data', { ascending: false });
-    setLancamentos(ltsFinal || []);
-    setMesResumo(mesesDisponiveis(ltsFinal || [])[0]);
-    setCarregando(false);
-  }
-
-  async function gerarRecorrentesFaltantes(recs, lts) {
-    const hoje = new Date();
-    const mes = hoje.getMonth(), ano = hoje.getFullYear();
-    const paraInserir = [];
-    recs.forEach(r => {
-      const existe = lts.some(l => l.origem_recorrente_id === r.id &&
-        new Date(l.data + 'T00:00:00').getMonth() === mes &&
-        new Date(l.data + 'T00:00:00').getFullYear() === ano);
-      if (!existe) {
-        const ultimoDia = new Date(ano, mes + 1, 0).getDate();
-        const dia = Math.min(r.dia_vencimento, ultimoDia);
-        const dataStr = new Date(ano, mes, dia).toISOString().slice(0, 10);
-        paraInserir.push({
-          user_id: userId, tipo: r.tipo, pessoa: r.pessoa, valor: r.valor,
-          categoria: r.categoria, descricao: r.descricao, data: dataStr,
-          origem_recorrente_id: r.id, recorrente: true
-        });
-      }
-    });
-    if (paraInserir.length) {
-      await supabase.from('lancamentos').insert(paraInserir);
-    }
-  }
+  useEffect(() => {
+    if (!mesResumo) setMesResumo(mesesDisponiveis(lancamentos)[0]);
+  }, [lancamentos]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!valor || Number(valor) <= 0 || !data) return;
     const cat = tabForm !== 'aporte' ? categoria : null;
 
-    let origemId = null;
-    if (ehFixa && tabForm !== 'aporte') {
-      const dia = new Date(data + 'T00:00:00').getDate();
-      const { data: novoRec } = await supabase.from('recorrentes').insert({
-        user_id: userId, tipo: tabForm, pessoa, valor: Number(valor),
-        categoria: cat, descricao, dia_vencimento: dia
-      }).select().single();
-      origemId = novoRec.id;
-      setRecorrentes(prev => [...prev, novoRec]);
-    }
-
     const { data: novoLt } = await supabase.from('lancamentos').insert({
       user_id: userId, tipo: tabForm, pessoa, valor: Number(valor), data,
-      categoria: cat, descricao, origem_recorrente_id: origemId, recorrente: !!(ehFixa && tabForm !== 'aporte')
+      categoria: cat, descricao, origem_conta_id: null
     }).select().single();
 
     setLancamentos(prev => [novoLt, ...prev]);
-    setValor(''); setDescricao(''); setEhFixa(false);
+    setValor(''); setDescricao('');
   }
 
   async function removerLancamento(id) {
     await supabase.from('lancamentos').delete().eq('id', id);
     setLancamentos(prev => prev.filter(l => l.id !== id));
-  }
-
-  async function removerRecorrente(id) {
-    await supabase.from('recorrentes').delete().eq('id', id);
-    setRecorrentes(prev => prev.filter(r => r.id !== id));
   }
 
   async function salvarSettings(e) {
@@ -136,7 +60,7 @@ export default function MetaTab({ userId }) {
   }
 
   function exportarBackup() {
-    const payload = { config, lancamentos, recorrentes };
+    const payload = { config, lancamentos };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -145,8 +69,6 @@ export default function MetaTab({ userId }) {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
-
-  if (carregando || !config) return <div className="empty">Carregando seus dados...</div>;
 
   const goal = calcularMetaGoal(lancamentos, config);
   const meses = mesesDisponiveis(lancamentos);
@@ -261,8 +183,11 @@ export default function MetaTab({ userId }) {
           <div className="card">
             <div className="tabs">
               <button className={`tab-btn ${tabForm === 'aporte' ? 'active' : ''}`} onClick={() => setTabForm('aporte')}>+ Aporte</button>
-              <button className={`tab-btn ${tabForm === 'despesa' ? 'active' : ''}`} onClick={() => { setTabForm('despesa'); setCategoria(CATEGORIAS_DESPESA[0]); }}>+ Despesa</button>
-              <button className={`tab-btn ${tabForm === 'renda' ? 'active' : ''}`} onClick={() => { setTabForm('renda'); setCategoria(ORIGENS_RENDA[0]); }}>+ Renda</button>
+              <button className={`tab-btn ${tabForm === 'despesa' ? 'active' : ''}`} onClick={() => { setTabForm('despesa'); setCategoria(CATEGORIAS_DESPESA[0]); }}>+ Despesa avulsa</button>
+              <button className={`tab-btn ${tabForm === 'renda' ? 'active' : ''}`} onClick={() => { setTabForm('renda'); setCategoria(ORIGENS_RENDA[0]); }}>+ Renda avulsa</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 12 }}>
+              Use isso pra gastos e ganhos pontuais (não recorrentes). Contas fixas, parceladas ou cartão ficam na seção "Minhas contas" abaixo.
             </div>
             <form onSubmit={handleSubmit}>
               <div className="person-toggle">
@@ -282,37 +207,11 @@ export default function MetaTab({ userId }) {
                 )}
               </div>
               <div><label>Descrição (opcional)</label><input value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="ex: conserto do carro" /></div>
-              {tabForm !== 'aporte' && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={ehFixa} onChange={e => setEhFixa(e.target.checked)} />
-                  <span style={{ fontSize: 13, color: 'var(--ink)' }}>Conta fixa — repetir todo mês automaticamente</span>
-                </label>
-              )}
               <button className="btn-primary" type="submit">
                 {tabForm === 'aporte' ? 'Guardar aporte' : tabForm === 'despesa' ? 'Lançar despesa' : 'Lançar renda'}
               </button>
             </form>
           </div>
-
-          {recorrentes.length > 0 && (
-            <div className="card">
-              <h2>Contas fixas cadastradas</h2>
-              {recorrentes.map(r => (
-                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{r.descricao || tipoLabel[r.tipo]}</div>
-                    <div style={{ color: 'var(--ink-muted)', fontSize: 12 }}>
-                      {tipoLabel[r.tipo]}{r.categoria ? ' · ' + r.categoria : ''} · dia {r.dia_vencimento} · {r.pessoa === 'eu' ? config.nome_eu : config.nome_esposa}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span className="mono">{fmtMoeda(r.valor)}</span>
-                    <button className="del-btn" onClick={() => removerRecorrente(r.id)}>parar</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
 
           <div className="card">
             <h2>Quem guardou mais</h2>
@@ -399,7 +298,7 @@ export default function MetaTab({ userId }) {
                       <td><span className={`tag ${l.pessoa}`}>{l.pessoa === 'eu' ? config.nome_eu : config.nome_esposa}</span></td>
                       <td>
                         <span className={`tag ${l.tipo}`}>{tipoLabel[l.tipo]}{l.categoria ? ' · ' + l.categoria : ''}</span>
-                        {l.recorrente && <span className="tag fixa" style={{ marginLeft: 4 }}>fixa</span>}
+                        {l.origem_conta_id && <span className="tag fixa" style={{ marginLeft: 4 }}>conta</span>}
                       </td>
                       <td>{l.descricao || '—'}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{fmtMoeda(l.valor)}</td>
